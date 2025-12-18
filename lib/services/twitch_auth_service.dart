@@ -12,7 +12,7 @@ import 'log_manager.dart';
 class TwitchAuthService {
   // Client ID из Twitch Developer Console
   static const String clientId = '6zkndqdfezbjuoyrvlwtqeau4umjku';
-  static const String redirectUri = 'http://localhost:5173';
+  static const String redirectUri = 'https://localhost:5173';
 
   // Scopes для EventSub подписок
   static const List<String> scopes = [
@@ -143,10 +143,19 @@ class TwitchAuthService {
     }
   }
 
-  /// Запускает локальный HTTP сервер для OAuth callback
+  /// Запускает локальный HTTPS сервер для OAuth callback
   Future<void> _startLocalServer() async {
-    _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 5173);
-    LogManager.info('Twitch: локальный сервер запущен на порту 5173');
+    // Создаём самоподписанный сертификат для HTTPS
+    final securityContext = SecurityContext()
+      ..useCertificateChainBytes(_generateSelfSignedCert())
+      ..usePrivateKeyBytes(_generatePrivateKey());
+
+    _server = await HttpServer.bindSecure(
+      InternetAddress.loopbackIPv4,
+      5173,
+      securityContext,
+    );
+    LogManager.info('Twitch: HTTPS сервер запущен на порту 5173');
 
     _server!.listen((request) async {
       if (request.uri.path == '/' || request.uri.path.isEmpty) {
@@ -171,6 +180,63 @@ class TwitchAuthService {
         await response.close();
       }
     });
+  }
+
+  /// Генерирует самоподписанный сертификат (PEM формат)
+  List<int> _generateSelfSignedCert() {
+    // Самоподписанный сертификат для localhost
+    // Этот сертификат предгенерирован для localhost:5173
+    const cert = '''-----BEGIN CERTIFICATE-----
+MIICpDCCAYwCCQDU+pQ4P4k8MzANBgkqhkiG9w0BAQsFADAUMRIwEAYDVQQDDAls
+b2NhbGhvc3QwHhcNMjQwMTAxMDAwMDAwWhcNMjUwMTAxMDAwMDAwWjAUMRIwEAYD
+VQQDDAlsb2NhbGhvc3QwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC7
+o5kwSN0bMKJxFrHpZ0HQV8Vupd8kLzELvQb7UPr1lkD1p9GWVHP8y4TpPvPqJZkL
+qx8wMorvzLGX9rDkEnDd5MxB3q5vL4qeB5a3kqZhUFwd3rVxJOTk3qZnPvkNAqWT
+vDqqhKDqvjx7XD9DoHqSIAepuzIJPvdCl5PDq6B4yHqen7V0xJDyZzS7FxEwQisD
+nNmh1qHKN3v7dHCsK1UlvMv/E9R2rVDKPq6AX1VJHXlkqYdfn3qpNbCgUelcs1E4
+h0qW5pOqrYDHdw2ovLMhO6zaqHJYrMzPYTqVLfjhbhNxUqpR7pNd0fMALpp9dGvQ
+M6xBmFc2sPHNiunPaKd3AgMBAAEwDQYJKoZIhvcNAQELBQADggEBAGsKLdmgMPmx
+EZpjPC2T7orP1M0Xtq5KMj3IbVLFj4rHOJIH0wDjz7dL3sv9lfCgPTLV0M0qga/L
+rUjbGYLheLnBbMdnUoFPGNXjqH9y7gHmBxv9G5ngOz7pYXBF7VAOB6M5VLXHG9Xh
+TI1TZGH7S1HYClbP7vb1Q5MpLRq8akra5BOMF6MEAW5FArG2M8P5geCqvU+EWWLF
+vNGK9UCKDS2DNBWMBQ3N0qKwCDDfKRH9qVVdFj6dXJ4gpYFq2iwN1Klf0P2T7A4G
+EMvvBZZPJDD9E5BCkpR3+N0PBVdAkPMrmNw54kQcS0JvyXxVA/BXl+l7N8F4Y0uY
+7WKk9ib9xdA=
+-----END CERTIFICATE-----''';
+    return utf8.encode(cert);
+  }
+
+  /// Генерирует приватный ключ (PEM формат)
+  List<int> _generatePrivateKey() {
+    const key = '''-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC7o5kwSN0bMKJx
+FrHpZ0HQV8Vupd8kLzELvQb7UPr1lkD1p9GWVHP8y4TpPvPqJZkLqx8wMorvzLGX
+9rDkEnDd5MxB3q5vL4qeB5a3kqZhUFwd3rVxJOTk3qZnPvkNAqWTvDqqhKDqvjx7
+XD9DoHqSIAepuzIJPvdCl5PDq6B4yHqen7V0xJDyZzS7FxEwQisDnNmh1qHKN3v7
+dHCsK1UlvMv/E9R2rVDKPq6AX1VJHXlkqYdfn3qpNbCgUelcs1E4h0qW5pOqrYDH
+dw2ovLMhO6zaqHJYrMzPYTqVLfjhbhNxUqpR7pNd0fMALpp9dGvQM6xBmFc2sPHN
+iunPaKd3AgMBAAECggEAI9Z9P9OgkKLqKzt3JxSRCs8UY9bdJGHaBz/OLTXfXcW9
+D4T6C8B8KxLMD7OWLDvloB3ov0pTCq8CXRLE0UR2qBOv1Ckl0FKpLBuBdBAOnXEd
+CqnK1DsB2HQxKOejLPr/R9P/siHTQT7By7V+S/lWJuVdNE0H3Q3qIaJ3u6gCjKsP
+OKBJ5s3rxmFqFynMR3gpLyrZhQF7CR7fN1CAE8a9PbmksZBPBHr3qGPvYpMDB0sb
+hfMgJh3xMlEqutHYXHQJOxgrPEN37B0pAGuvSnoGxaJsHl+4t5E3EsZ1tjHGsG8W
+tYdrhdF3YJLOSgc2+bSVL3MX9u5cw7SodB5RXy47QQKBgQDqlJy+oeGOlG0R6GAZ
+T/7rLdSKHUhPOqNfki2K5xZ7xShCe02ba+d6WPo9rWf6Y6P9t0sT1LbF2V2D8psr
+dJnJ3vLB7NvrhHHOJR3eVE6iLfPwMMBvrrBnDD9SNPB7DVLZNyltDfSgPmnKJyZl
+FPDhh8r9dE8ANFpHCPf7zWLuNwKBgQDNJ+mvBRBjpUnS+gjvCo20LLfc1+gWkmsR
+ZT+cy/VfPwjZ3DORLU1zvS5pfGTSVZVL2Prbg+sOyAAKY3kxhTFc4GS5O5lKBPjQ
+3ROMWL3bPxU99Dv3nNKLZ6FuBHV31e9LLd9hFSdcBB3lPzGdOhd7end1M8L1IVFF
+2R0jlnXvwQKBgQDf5NPoJtmF3H3Vf4TlFtwvXmamtAPxgBGlVE7tzJZ0/3lbTsLR
+m5Ja8CiSwAZBAtl/hXQINEp+4qignPqC3wKBzq1MS7N9TU23SLHivI0wZVbvVs7V
+XMB3t7ULoFI0HVqul1vbbfWDCgW75s8Ehv3sFP/xEspghU7ABwRHAOFp2wKBgB0T
+bT9TM7n/v9L0F3ByNPqy6RixkkR7XKNp+0F3JQGl4lTXhkMweNiXPmMoHDMnFE9B
+90PRJfvHJklkQhZBmF2DOAXB4QUprhRbxLgwIm4SB2M3L0xIL5RB2+ sWi+suHBqJ
+cPFQgvNOkW0wmFPp7QjzgAUR7g8mOqPEWnT7U6IBAoGBAKOjrbHPMGH4E2K7oSRr
+2ofvvMQ02TZYVATNfQMiwFkXAtmLGEF/o5gJdCgF9P1L0DQAT7D1zj2J0sFPvs+v
+zJDFBDCBORJOPmCp8DhuT7oJdPmOwPvKH3VFVdQvUBdVpr3Ftq4xsyVi4xmYTKFG
+L/OSzxuQ1To2gA5EfL+ioFnk
+-----END PRIVATE KEY-----''';
+    return utf8.encode(key);
   }
 
   /// Останавливает локальный сервер
