@@ -21,7 +21,14 @@ class Donation {
   /// Calculates the number of seconds to add based on the donation amount and rate.
   /// Rate means: [rate] RUB = 60 minutes
   /// Formula: seconds = (amount / rate) * 60 minutes * 60 seconds = (amount / rate) * 3600
+  ///
+  /// Special case: if currency is "SEC", amount is treated as seconds directly
+  /// (used for Twitch events like subscriptions and channel points)
   int calculateSeconds(double rate) {
+    // Для валюты SEC (секунды) - возвращаем amount напрямую
+    if (currency == 'SEC') {
+      return amount.round();
+    }
     if (rate <= 0) return 0;
     return ((amount / rate) * 3600).round();
   }

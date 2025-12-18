@@ -12,3 +12,7 @@ export 'donation_alerts_adapter.dart';
 export 'donate_pay_adapter.dart';
 export 'donate_stream_adapter.dart';
 export 'donatex_adapter.dart';
+
+// Twitch integration
+export 'twitch_auth_service.dart';
+export 'twitch_eventsub_adapter.dart';

@@ -13,6 +13,7 @@ import 'services/donation_alerts_adapter.dart';
 import 'services/donate_pay_adapter.dart';
 import 'services/donate_stream_adapter.dart';
 import 'services/donatex_adapter.dart';
+import 'services/twitch_eventsub_adapter.dart';
 import 'services/web_server_service.dart';
 import 'services/sound_service.dart';
 import 'services/log_manager.dart';
@@ -79,6 +80,8 @@ void main() async {
   LogManager.info('Адаптер DonateStream зарегистрирован');
   donationService.registerAdapter(DonateXAdapter());
   LogManager.info('Адаптер DonateX зарегистрирован');
+  donationService.registerAdapter(TwitchEventSubAdapter());
+  LogManager.info('Адаптер Twitch зарегистрирован');
   
   // Auto-connect enabled services from saved settings
   final settings = donationService.settings;

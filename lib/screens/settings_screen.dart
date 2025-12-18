@@ -6,6 +6,7 @@ import '../providers/localization_provider.dart';
 import '../providers/timer_provider.dart';
 import '../services/donation_service.dart';
 import '../services/donation_service_adapter.dart';
+import '../services/twitch_eventsub_adapter.dart';
 import '../services/sound_service.dart';
 import '../services/log_manager.dart';
 import '../models/service_config.dart';
@@ -157,6 +158,18 @@ class _ServicesSettingsTabState extends State<ServicesSettingsTab> {
   bool _dxEnabled = false;
   bool _dxTokenVisible = false;
 
+  // Twitch state
+  bool _twitchEnabled = false;
+  bool _twitchAuthorizing = false;
+  TwitchTimeSettings _twitchTimeSettings = TwitchTimeSettings();
+  final _twitchChannelPointsController = TextEditingController(text: '60');
+  final _twitchTier1Controller = TextEditingController(text: '300');
+  final _twitchTier2Controller = TextEditingController(text: '600');
+  final _twitchTier3Controller = TextEditingController(text: '1500');
+  final _twitchGiftedController = TextEditingController(text: '300');
+  final _twitchResubController = TextEditingController(text: '60');
+  bool _twitchCountResubs = true;
+
   // Available socket servers for DonationAlerts
   static const List<String> _socketServers = [
     'socket5',
@@ -209,6 +222,23 @@ class _ServicesSettingsTabState extends State<ServicesSettingsTab> {
       _dxGroupUrlController.text = dxConfig.getCredential('groupUrl') ?? '';
     }
 
+    // Twitch
+    final twitchConfig = settings.getServiceConfig('Twitch');
+    if (twitchConfig != null) {
+      _twitchEnabled = twitchConfig.enabled;
+      final timeSettingsStr = twitchConfig.getCredential('timeSettingsJson');
+      if (timeSettingsStr != null && timeSettingsStr.isNotEmpty) {
+        _twitchTimeSettings = _deserializeTimeSettings(timeSettingsStr);
+      }
+    }
+    _twitchChannelPointsController.text = _twitchTimeSettings.channelPointsSeconds.toString();
+    _twitchTier1Controller.text = _twitchTimeSettings.tier1SubSeconds.toString();
+    _twitchTier2Controller.text = _twitchTimeSettings.tier2SubSeconds.toString();
+    _twitchTier3Controller.text = _twitchTimeSettings.tier3SubSeconds.toString();
+    _twitchGiftedController.text = _twitchTimeSettings.giftedSubSeconds.toString();
+    _twitchResubController.text = _twitchTimeSettings.resubSeconds.toString();
+    _twitchCountResubs = _twitchTimeSettings.countResubs;
+
     setState(() {});
   }
 
@@ -219,6 +249,12 @@ class _ServicesSettingsTabState extends State<ServicesSettingsTab> {
     _dsTokenController.dispose();
     _dxWidgetUrlController.dispose();
     _dxGroupUrlController.dispose();
+    _twitchChannelPointsController.dispose();
+    _twitchTier1Controller.dispose();
+    _twitchTier2Controller.dispose();
+    _twitchTier3Controller.dispose();
+    _twitchGiftedController.dispose();
+    _twitchResubController.dispose();
     super.dispose();
   }
 
@@ -314,6 +350,10 @@ class _ServicesSettingsTabState extends State<ServicesSettingsTab> {
 
           // DonateX
           _buildDonateXSection(localization),
+          const SizedBox(height: 16),
+
+          // Twitch (Subathon)
+          _buildTwitchSection(localization),
         ],
       ),
     );
@@ -671,6 +711,324 @@ class _ServicesSettingsTabState extends State<ServicesSettingsTab> {
         'groupUrl': _dxGroupUrlController.text,
       },
     );
+  }
+
+  Widget _buildTwitchSection(LocalizationProvider localization) {
+    final status = _getAdapterStatus('Twitch');
+    final donationService = context.read<DonationService?>();
+    final twitchAdapter = donationService?.getAdapter('Twitch') as TwitchEventSubAdapter?;
+    final isAuthorized = twitchAdapter?.isAuthorized ?? false;
+    final userLogin = twitchAdapter?.userLogin;
+
+    return NesContainer(
+      label: 'Twitch (Subathon)',
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Enable checkbox + status indicator
+            Row(
+              children: [
+                NesCheckBox(
+                  value: _twitchEnabled,
+                  onChange: (value) => setState(() => _twitchEnabled = value),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  _twitchEnabled
+                      ? localization.tr('enabled')
+                      : localization.tr('disabled'),
+                ),
+                const Spacer(),
+                _buildStatusIndicator(status),
+                const SizedBox(width: 8),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // Authorization section
+            if (isAuthorized) ...[
+              Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Авторизован как: $userLogin',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              NesButton.text(
+                type: NesButtonType.warning,
+                text: 'Выйти из Twitch',
+                onPressed: () async {
+                  await twitchAdapter?.logout();
+                  setState(() {});
+                },
+              ),
+            ] else ...[
+              Text(
+                'Для работы subathon-функций необходима авторизация в Twitch',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              const SizedBox(height: 8),
+              NesButton.text(
+                type: NesButtonType.primary,
+                text: _twitchAuthorizing ? 'Авторизация...' : 'Войти через Twitch',
+                onPressed: _twitchAuthorizing ? null : () => _authorizeTwitch(twitchAdapter),
+              ),
+            ],
+            const SizedBox(height: 24),
+
+            // Time settings section
+            Text(
+              'Настройки времени (в секундах)',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+
+            // Channel Points
+            _buildTimeSettingRow(
+              'Баллы канала (за использование):',
+              _twitchChannelPointsController,
+              'Время за каждое использование баллов канала',
+            ),
+            const SizedBox(height: 12),
+
+            // Subscriptions
+            Text(
+              'Подписки:',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildCompactTimeField('Tier 1', _twitchTier1Controller),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildCompactTimeField('Tier 2', _twitchTier2Controller),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildCompactTimeField('Tier 3', _twitchTier3Controller),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Gifted Subs
+            _buildTimeSettingRow(
+              'Gifted Sub (за каждый):',
+              _twitchGiftedController,
+              'Время за каждую подаренную подписку',
+            ),
+            const SizedBox(height: 12),
+
+            // Resubs
+            Row(
+              children: [
+                Expanded(
+                  child: _buildTimeSettingRow(
+                    'Resub:',
+                    _twitchResubController,
+                    'Время за продление подписки',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                NesCheckBox(
+                  value: _twitchCountResubs,
+                  onChange: (value) => setState(() => _twitchCountResubs = value),
+                ),
+                const SizedBox(width: 8),
+                const Text('Учитывать resub\'ы', style: TextStyle(fontSize: 12)),
+              ],
+            ),
+            const SizedBox(height: 24),
+
+            // Save button
+            NesButton.text(
+              type: NesButtonType.success,
+              text: localization.tr('save'),
+              onPressed: _saveTwitchConfig,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimeSettingRow(String label, TextEditingController controller, String hint) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 12)),
+        const SizedBox(height: 4),
+        TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            hintText: hint,
+            border: const OutlineInputBorder(),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            suffixText: 'сек',
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCompactTimeField(String label, TextEditingController controller) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 11)),
+        const SizedBox(height: 4),
+        TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            border: const OutlineInputBorder(),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            suffixText: 'с',
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _authorizeTwitch(TwitchEventSubAdapter? adapter) async {
+    if (adapter == null) return;
+
+    setState(() => _twitchAuthorizing = true);
+
+    try {
+      final success = await adapter.authorize();
+      if (success && mounted) {
+        NesSnackbar.show(
+          context,
+          text: 'Twitch авторизация успешна!',
+          type: NesSnackbarType.success,
+        );
+        // Save credentials
+        await _saveTwitchConfig();
+      } else if (mounted) {
+        NesSnackbar.show(
+          context,
+          text: 'Ошибка авторизации Twitch',
+          type: NesSnackbarType.error,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        NesSnackbar.show(
+          context,
+          text: 'Ошибка: $e',
+          type: NesSnackbarType.error,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _twitchAuthorizing = false);
+      }
+    }
+  }
+
+  Future<void> _saveTwitchConfig() async {
+    final donationService = context.read<DonationService?>();
+    if (donationService == null) return;
+
+    final twitchAdapter = donationService.getAdapter('Twitch') as TwitchEventSubAdapter?;
+
+    // Update time settings
+    _twitchTimeSettings = TwitchTimeSettings(
+      channelPointsSeconds: int.tryParse(_twitchChannelPointsController.text) ?? 60,
+      tier1SubSeconds: int.tryParse(_twitchTier1Controller.text) ?? 300,
+      tier2SubSeconds: int.tryParse(_twitchTier2Controller.text) ?? 600,
+      tier3SubSeconds: int.tryParse(_twitchTier3Controller.text) ?? 1500,
+      giftedSubSeconds: int.tryParse(_twitchGiftedController.text) ?? 300,
+      resubSeconds: int.tryParse(_twitchResubController.text) ?? 60,
+      countResubs: _twitchCountResubs,
+    );
+
+    // Build credentials map with string values
+    final credentials = <String, String>{};
+
+    if (twitchAdapter != null) {
+      final adapterCreds = twitchAdapter.getCredentials();
+      twitchAdapter.timeSettings = _twitchTimeSettings;
+
+      // Copy auth credentials
+      if (adapterCreds['accessToken'] != null) {
+        credentials['accessToken'] = adapterCreds['accessToken'].toString();
+      }
+      if (adapterCreds['refreshToken'] != null) {
+        credentials['refreshToken'] = adapterCreds['refreshToken'].toString();
+      }
+      if (adapterCreds['userId'] != null) {
+        credentials['userId'] = adapterCreds['userId'].toString();
+      }
+      if (adapterCreds['userLogin'] != null) {
+        credentials['userLogin'] = adapterCreds['userLogin'].toString();
+      }
+      if (adapterCreds['tokenExpiresAt'] != null) {
+        credentials['tokenExpiresAt'] = adapterCreds['tokenExpiresAt'].toString();
+      }
+    }
+
+    // Serialize time settings as JSON string
+    credentials['timeSettingsJson'] = _serializeTimeSettings(_twitchTimeSettings);
+
+    final config = ServiceConfig(
+      serviceName: 'Twitch',
+      enabled: _twitchEnabled,
+      credentials: credentials,
+    );
+
+    await donationService.updateServiceConfig(config);
+
+    if (mounted) {
+      NesSnackbar.show(
+        context,
+        text: 'Twitch OK!',
+        type: NesSnackbarType.success,
+      );
+    }
+  }
+
+  String _serializeTimeSettings(TwitchTimeSettings settings) {
+    return '${settings.channelPointsSeconds},'
+           '${settings.tier1SubSeconds},'
+           '${settings.tier2SubSeconds},'
+           '${settings.tier3SubSeconds},'
+           '${settings.giftedSubSeconds},'
+           '${settings.resubSeconds},'
+           '${settings.countResubs ? 1 : 0}';
+  }
+
+  TwitchTimeSettings _deserializeTimeSettings(String str) {
+    try {
+      final parts = str.split(',');
+      if (parts.length >= 7) {
+        return TwitchTimeSettings(
+          channelPointsSeconds: int.tryParse(parts[0]) ?? 60,
+          tier1SubSeconds: int.tryParse(parts[1]) ?? 300,
+          tier2SubSeconds: int.tryParse(parts[2]) ?? 600,
+          tier3SubSeconds: int.tryParse(parts[3]) ?? 1500,
+          giftedSubSeconds: int.tryParse(parts[4]) ?? 300,
+          resubSeconds: int.tryParse(parts[5]) ?? 60,
+          countResubs: parts[6] == '1',
+        );
+      }
+    } catch (_) {}
+    return TwitchTimeSettings();
   }
 }
 
